@@ -1,0 +1,1784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OddsEdge | Sharp Money Detector</title>
+  <meta name="description" content="Autonomous sharp money detector monitoring TxLINE consensus, Pinnacle, and Polymarket live feeds to capture tri-source market divergence.">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/@solana/web3.js@1.98.4/lib/index.iife.js"></script>
+  <style>
+    /* ===== DESIGN TOKENS ===== */
+    :root {
+      --bg:            #000204;
+      --surface:       #0a0f0d;
+      --border:        #1a2420;
+      --text:          #FDFDFF;
+      --text-muted:    #8a9490;
+      --neon:          #C0FF38;
+      --neon-dim:      rgba(192,255,56,0.12);
+      --neon-glow:     rgba(192,255,56,0.25);
+      --glass:         rgba(253,253,255,0.04);
+      --glass-border:  rgba(192,255,56,0.15);
+      --red:           #ff4444;
+      --red-dim:       rgba(255,68,68,0.12);
+      --font-sans:     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono:     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --radius:        12px;
+      --radius-sm:     8px;
+    }
+
+    /* ===== RESET ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+    a { color: inherit; text-decoration: none; }
+    button { font-family: var(--font-sans); cursor: pointer; }
+
+    /* ===== SCROLLBAR ===== */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--neon-glow); }
+
+    /* ===== PULSE ANIMATION (only one in the whole file) ===== */
+    @keyframes pulse {
+      0%, 100% { opacity: 0.5; transform: scale(0.9); box-shadow: none; }
+      50%       { opacity: 1;   transform: scale(1.1); box-shadow: 0 0 8px var(--neon); }
+    }
+    .pulse-dot {
+      width: 8px; height: 8px;
+      background: var(--neon);
+      border-radius: 50%;
+      display: inline-block;
+      animation: pulse 2s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    .pulse-dot.off {
+      background: var(--red);
+      animation: none;
+      box-shadow: none;
+    }
+
+    /* ===== GLASSMORPHISM CARD ===== */
+    .glass {
+      background: var(--glass);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+    }
+    .glass:hover { border-color: var(--neon-glow); }
+
+    /* ===== BADGE ===== */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 3px 8px;
+      border-radius: 4px;
+    }
+    .badge-neon   { background: var(--neon-dim);  color: var(--neon); border: 1px solid var(--glass-border); }
+    .badge-red    { background: var(--red-dim);   color: var(--red);  border: 1px solid rgba(255,68,68,0.3); }
+    .badge-muted  { background: rgba(255,255,255,0.06); color: var(--text-muted); border: 1px solid var(--border); }
+    .badge-steam  { background: var(--neon-dim);  color: var(--neon); border: 1px solid var(--neon); }
+    .badge-tri    { background: rgba(255,255,255,0.06); color: var(--text);       border: 1px solid var(--border); }
+
+    /* ===== SECTION LABEL ===== */
+    .section-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.72rem;
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--text-muted);
+      margin-bottom: 1.25rem;
+    }
+    .section-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ===== CONFIDENCE BAR ===== */
+    .conf-bar-wrap { height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
+    .conf-bar-fill { height: 100%; background: var(--neon); border-radius: 3px; transition: width 0.4s ease; }
+
+    /* ===== FIXED NAV ===== */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.85rem 2rem;
+      background: rgba(0,2,4,0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo { font-size: 1.2rem; font-weight: 800; color: var(--neon); letter-spacing: -0.03em; text-transform: uppercase; }
+    .nav-links { display: flex; gap: 1.75rem; }
+    .nav-links a {
+      font-size: 0.78rem;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--neon); }
+    .nav-right { display: flex; align-items: center; gap: 0.75rem; }
+    .nav-status {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.72rem; font-family: var(--font-mono);
+      padding: 5px 10px; border-radius: 6px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.04);
+    }
+    #status-text { color: var(--text-muted); }
+    #status-text.live { color: var(--neon); }
+
+    /* hamburger */
+    .hamburger { display: none; flex-direction: column; gap: 4px; background: none; border: none; padding: 4px; }
+    .hamburger span { width: 20px; height: 2px; background: var(--text-muted); border-radius: 1px; transition: background 0.2s; }
+    .hamburger:hover span { background: var(--neon); }
+
+    /* ===== PAGE WRAPPER ===== */
+    .page { padding-top: 60px; }
+
+    /* ===== HERO ===== */
+    .hero {
+      min-height: calc(100vh - 60px);
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-items: center;
+      padding: 4rem 2rem;
+      gap: 3rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -200px; left: -200px;
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(192,255,56,0.05) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-left { display: flex; flex-direction: column; gap: 1.75rem; }
+    .hero-eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      color: var(--neon);
+    }
+    .hero-title {
+      font-size: clamp(3rem, 6vw, 5.5rem);
+      font-weight: 900;
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+      color: var(--text);
+    }
+    .hero-title span { color: var(--neon); }
+    .hero-desc {
+      font-size: 1.05rem;
+      color: var(--text-muted);
+      max-width: 480px;
+      line-height: 1.6;
+    }
+    .hero-live {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--neon);
+      background: var(--neon-dim);
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: 1px solid rgba(192,255,56,0.25);
+      width: fit-content;
+    }
+    .hero-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid var(--border);
+    }
+    .hero-stat-val {
+      font-family: var(--font-mono);
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--neon);
+      line-height: 1.1;
+    }
+    .hero-stat-label {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-top: 3px;
+    }
+    .hero-right {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      /* Give the right column a fixed vertical anchor so portrait frame doesn't overflow */
+      height: min(75vh, 700px);
+    }
+    .video-frame {
+      /* Height drives everything; width is derived from the 9:16 ratio */
+      height: 100%;
+      width: auto;
+      aspect-ratio: 9 / 16;
+      /* Never taller than the viewport */
+      max-height: min(75vh, 700px);
+      border-radius: 20px;
+      overflow: hidden;
+      background: var(--surface);
+      position: relative;
+      flex-shrink: 0;
+    }
+    .video-frame video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+      display: block;
+    }
+
+
+    /* ===== MAIN CONTENT ===== */
+    .content { padding: 2rem; display: flex; flex-direction: column; gap: 3rem; max-width: 1400px; margin: 0 auto; }
+
+    /* ===== FIXTURES SECTION ===== */
+    .fixtures-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 1rem;
+    }
+    .fixture-card {
+      padding: 1.25rem;
+      cursor: pointer;
+      transition: border-color 0.2s, transform 0.15s;
+      position: relative;
+      overflow: hidden;
+    }
+    .fixture-card:hover { border-color: var(--neon-glow); transform: translateY(-2px); }
+    .fixture-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: transparent;
+      transition: background 0.2s;
+    }
+    .fixture-card.status-live::before { background: var(--neon); }
+    .fixture-card.status-finished::before { background: var(--border); }
+    .fixture-card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.75rem;
+    }
+    .fixture-teams { font-weight: 700; font-size: 0.95rem; line-height: 1.3; }
+    .fixture-vs { color: var(--text-muted); font-size: 0.8rem; margin-top: 2px; }
+    .fixture-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+    }
+    .fixture-time { color: var(--text-muted); }
+    .fixture-result {
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      padding-top: 0.5rem;
+      border-top: 1px solid var(--border);
+    }
+    .fixture-result span { color: var(--text); font-weight: 600; }
+    .fixture-signals-count {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      margin-top: 0.5rem;
+    }
+    .fixture-signals-count b { color: var(--neon); }
+
+    /* ===== MODAL ===== */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,2,4,0.85);
+      backdrop-filter: blur(8px);
+      z-index: 200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      width: 100%;
+      max-width: 720px;
+      max-height: 88vh;
+      overflow-y: auto;
+      padding: 2rem;
+      position: relative;
+    }
+    .modal-close {
+      position: absolute;
+      top: 1rem; right: 1rem;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      width: 32px; height: 32px;
+      border-radius: 6px;
+      font-size: 1.1rem;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+    }
+    .modal-close:hover { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+    .modal h2 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+    .modal-subtitle { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.5rem; font-family: var(--font-mono); }
+    .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1.5rem; }
+    .modal-stat {
+      padding: 0.9rem 1rem;
+      background: rgba(0,0,0,0.2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .modal-stat-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 4px; }
+    .modal-stat-val { font-family: var(--font-mono); font-size: 1.1rem; color: var(--neon); font-weight: 600; }
+    .modal-signal-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    .modal-signal-item {
+      padding: 1rem;
+      background: rgba(0,0,0,0.15);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .modal-signal-item:hover { border-color: var(--neon-glow); }
+    .modal-signal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .modal-signal-expand { display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+    .modal-signal-expand.open { display: block; }
+    .modal-signal-detail { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .msd-item { font-size: 0.78rem; }
+    .msd-label { color: var(--text-muted); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    .msd-val { font-family: var(--font-mono); margin-top: 2px; }
+
+    /* ===== SIGNALS SECTION ===== */
+    .signals-list { display: flex; flex-direction: column; gap: 0.85rem; }
+    .signal-row {
+      padding: 1rem 1.25rem;
+      cursor: pointer;
+      transition: border-color 0.2s;
+      border-radius: var(--radius);
+    }
+    .signal-row:hover { border-color: var(--neon-glow); }
+    .signal-row-top { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .signal-match { font-weight: 700; font-size: 0.92rem; flex: 1; min-width: 160px; }
+    .signal-market { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); }
+    .signal-row-expand { display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+    .signal-row-expand.open { display: block; }
+    /* tri-source probs */
+    .tri-probs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem; margin-bottom: 1rem; }
+    .tri-prob-box {
+      background: rgba(0,0,0,0.2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0.7rem;
+      text-align: center;
+    }
+    .tri-prob-box.outlier { border-color: var(--neon); background: rgba(192,255,56,0.03); }
+    .tri-prob-src { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 4px; }
+    .tri-prob-val { font-family: var(--font-mono); font-size: 1.05rem; }
+    /* steam display */
+    .steam-info { display: flex; gap: 1.5rem; margin-bottom: 1rem; }
+    .steam-metric { display: flex; flex-direction: column; gap: 2px; }
+    .steam-metric-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); }
+    .steam-metric-val { font-family: var(--font-mono); font-size: 1.05rem; }
+    .neon-val { color: var(--neon); }
+    .red-val  { color: var(--red); }
+    .signal-detail-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
+    .sdi { padding: 0.65rem 0.8rem; background: rgba(0,0,0,0.15); border: 1px solid var(--border); border-radius: 6px; }
+    .sdi-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 3px; }
+    .sdi-val { font-family: var(--font-mono); font-size: 0.85rem; }
+    /* explain button */
+    .btn-explain {
+      margin-top: 0.75rem;
+      background: transparent;
+      border: 1px solid var(--neon);
+      color: var(--neon);
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 6px 14px;
+      border-radius: 4px;
+      transition: all 0.2s;
+    }
+    .btn-explain:hover { background: var(--neon); color: var(--bg); }
+    .btn-explain:disabled { border-color: var(--border); color: var(--text-muted); cursor: not-allowed; }
+    .commentary-box {
+      margin-top: 0.75rem;
+      padding: 0.85rem 1rem;
+      background: rgba(192,255,56,0.03);
+      border-left: 2px solid var(--neon);
+      border-radius: 0 6px 6px 0;
+      font-size: 0.83rem;
+      line-height: 1.55;
+    }
+    .btn-verify {
+      margin-top: 0.5rem;
+      margin-left: 0.5rem;
+      background: transparent;
+      border: 1px solid rgba(56,189,248,0.6);
+      color: #38bdf8;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 6px 14px;
+      border-radius: 4px;
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+    .btn-verify:hover { background: rgba(56,189,248,0.1); }
+    .btn-verify:disabled { border-color: var(--border); color: var(--text-muted); cursor: not-allowed; }
+    .merkle-box {
+      margin-top: 0.75rem;
+      padding: 0.85rem 1rem;
+      background: rgba(56,189,248,0.03);
+      border-left: 2px solid #38bdf8;
+      border-radius: 0 6px 6px 0;
+    }
+    .merkle-label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #38bdf8;
+      margin-bottom: 6px;
+      font-family: var(--font-mono);
+    }
+    .merkle-hash {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      word-break: break-all;
+      line-height: 1.4;
+    }
+    
+    /* ===== GROUPED FIXTURE CARDS ===== */
+    .fixture-group-card {
+      margin-bottom: 0.75rem;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid rgba(192,255,56,0.15);
+      background: rgba(253,253,255,0.04);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+    .fixture-group-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.85rem 1.25rem;
+      background: rgba(255,255,255,0.02);
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .fixture-group-header:hover {
+      background: rgba(255,255,255,0.04);
+    }
+    .fixture-group-title {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .fixture-group-names {
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: var(--text);
+    }
+    .fixture-group-meta {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .fixture-group-time {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+    .fixture-group-body {
+      background: rgba(0,0,0,0.15);
+      border-top: 1px solid var(--border);
+    }
+    .compact-signal-row {
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      padding: 0.65rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+    }
+    .compact-signal-row:last-child {
+      border-bottom: none;
+    }
+    .compact-signal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      width: 100%;
+    }
+    .compact-signal-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .compact-market-name {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text);
+      min-width: 140px;
+    }
+    .compact-conf {
+      font-size: 0.8rem;
+      color: var(--neon);
+      font-weight: 600;
+    }
+    .compact-signal-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 0 0.2rem 0;
+      flex-wrap: wrap;
+    }
+    .compact-signal-actions .btn-explain,
+    .compact-signal-actions .btn-verify {
+      margin-top: 0;
+      margin-left: 0;
+      padding: 4px 10px;
+      font-size: 0.62rem;
+    }
+    .compact-signal-actions .commentary-box,
+    .compact-signal-actions .merkle-box {
+      margin-top: 0.5rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.75rem;
+      padding: 0.5rem 0.75rem;
+      width: 100%;
+    }
+    .chevron-fg {
+      transition: transform 0.2s;
+    }
+    
+    /* ===== MERKLE DETAILS ===== */
+    .merkle-proof-details {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+      background: rgba(0,0,0,0.2);
+      padding: 0.65rem;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.03);
+    }
+    .merkle-detail-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.72rem;
+    }
+    .merkle-detail-item .md-label {
+      color: var(--text-muted);
+    }
+    .merkle-detail-item .md-val {
+      color: var(--text);
+    }
+    .merkle-detail-item .text-neon {
+      color: var(--neon);
+    }
+    .merkle-link-view {
+      font-size: 0.72rem;
+      color: #38bdf8;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+    .merkle-link-view:hover {
+      color: #7dd3fc;
+    }
+    .text-link {
+      color: #38bdf8;
+      text-decoration: underline;
+    }
+    .text-link:hover {
+      color: #7dd3fc;
+    }
+
+    /* ===== PREMIUM SIGNAL FACTOR MODAL DETAILS ===== */
+    .factor-row {
+      margin-bottom: 0.4rem;
+      font-size: 0.72rem;
+    }
+    .factor-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.15rem;
+      color: var(--text-muted);
+    }
+    .factor-header span:last-child {
+      font-family: var(--font-mono);
+      color: var(--text);
+    }
+    .factor-bar-bg {
+      height: 4px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .factor-bar-fill {
+      height: 100%;
+      background: var(--neon);
+      border-radius: 2px;
+    }
+    .factor-stats-table {
+      margin-top: 0.75rem;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      padding-top: 0.5rem;
+    }
+    .factor-stat-item {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.72rem;
+      margin-bottom: 0.25rem;
+    }
+    .factor-stat-label {
+      color: var(--text-muted);
+    }
+    .factor-stat-val {
+      font-family: var(--font-mono);
+      color: var(--text);
+    }
+
+    /* ===== LOGS SECTION ===== */
+    .log-console {
+      background: rgba(0,0,0,0.35);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+      height: 320px;
+      overflow-y: auto;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .log-line { display: flex; gap: 10px; line-height: 1.4; }
+    .log-ts { color: var(--border); flex-shrink: 0; width: 80px; }
+    .log-level-info  { color: var(--neon); }
+    .log-level-warn  { color: #ffb347; }
+    .log-level-error { color: var(--red); }
+    .log-msg { color: var(--text-muted); }
+
+    /* ===== P&L SECTION ===== */
+    .pnl-layout { display: grid; grid-template-columns: 1fr 300px; gap: 1.25rem; align-items: start; }
+    .pnl-chart-wrap { padding: 1.25rem 1.25rem 1rem; }
+    .pnl-chart-canvas-wrap { height: 220px; position: relative; }
+    .pnl-stats-col { display: flex; flex-direction: column; gap: 1rem; }
+    .pnl-stat-card { padding: 1.25rem; display: flex; flex-direction: column; gap: 4px; }
+    .pnl-stat-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); }
+    .pnl-stat-val { font-family: var(--font-mono); font-size: 1.75rem; font-weight: 700; color: var(--neon); line-height: 1.1; }
+    .pnl-stat-sub { font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); }
+    .pnl-acc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+    .pnl-acc-item { padding: 0.7rem 0.9rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; }
+    .pnl-acc-item-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 3px; }
+    .pnl-acc-item-val { font-family: var(--font-mono); font-size: 0.95rem; color: var(--neon); }
+    .pnl-usage { padding: 1rem 1.25rem; }
+
+
+    /* ===== FOOTER ===== */
+    footer {
+      padding: 2rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .footer-left { font-size: 0.8rem; color: var(--text-muted); }
+    .footer-left span { color: var(--neon); font-weight: 600; }
+    .footer-right { font-family: var(--font-mono); font-size: 0.68rem; color: var(--border); }
+
+    /* ===== EMPTY STATE ===== */
+    .empty-state {
+      padding: 2.5rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+    }
+
+    /* ===== OUTCOME CHIP ===== */
+    .outcome-chip { font-size: 0.62rem; font-family: var(--font-mono); font-weight: 700; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; }
+    .outcome-correct   { background: var(--neon-dim);   color: var(--neon); }
+    .outcome-incorrect { background: var(--red-dim);    color: var(--red);  }
+    .outcome-pending   { background: rgba(255,255,255,0.06); color: var(--text-muted); }
+
+    /* ===== SCROLL OFFSET — compensates for fixed 60px nav ===== */
+    section[id] { scroll-margin-top: 76px; }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 1024px) {
+      .pnl-layout { grid-template-columns: 1fr; gap: 1rem; }
+      .pnl-stats-col { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    }
+    @media (max-width: 768px) {
+      nav { padding: 0.75rem 1rem; }
+      .nav-links { display: none; flex-direction: column; position: fixed; top: 52px; left: 0; right: 0; background: rgba(0,2,4,0.97); padding: 1rem; border-bottom: 1px solid var(--border); gap: 1.25rem; z-index: 99; }
+      .nav-links.open { display: flex; }
+      .hamburger { display: flex; }
+      .hero { grid-template-columns: 1fr; min-height: auto; padding: 2rem 1rem 3rem; gap: 2rem; }
+      .hero-right { order: -1; height: min(70vh, 480px); }
+      /* Keep portrait 9:16 on mobile */
+      .video-frame { max-height: min(70vh, 480px); aspect-ratio: 9 / 16; height: 100%; }
+      .video-frame video { object-fit: cover; object-position: center; }
+      .hero-title { font-size: clamp(2.25rem, 9vw, 3.5rem); }
+      .hero-stats { grid-template-columns: repeat(3, 1fr); }
+      .content { padding: 1rem; gap: 2rem; }
+      .fixtures-grid { grid-template-columns: 1fr; }
+      .modal { padding: 1.25rem; }
+      .modal-grid { grid-template-columns: 1fr; }
+      .signal-detail-grid { grid-template-columns: 1fr; }
+      .tri-probs { grid-template-columns: 1fr; }
+      .steam-info { flex-direction: column; gap: 0.75rem; }
+      /* P&L: fully stacked on mobile */
+      .pnl-layout { grid-template-columns: 1fr; gap: 0.85rem; }
+      .pnl-stats-col { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+      .pnl-chart-canvas-wrap { height: 180px; }
+      .pnl-chart-wrap { padding: 1rem 1rem 0.75rem; }
+      footer { flex-direction: column; align-items: flex-start; }
+    }
+    @media (max-width: 480px) {
+      .hero-stats { grid-template-columns: 1fr 1fr; }
+      .pnl-stats-col { grid-template-columns: 1fr; }
+      .pnl-acc-grid { grid-template-columns: 1fr 1fr; }
+      .modal-signal-detail { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ===== NAV ===== -->
+<nav>
+  <span class="nav-logo">OddsEdge</span>
+  <div class="nav-links" id="nav-links">
+    <a href="#fixtures">Fixtures</a>
+    <a href="#signals">Signals</a>
+    <a href="#logs">Logs</a>
+    <a href="#pnl">P&amp;L</a>
+    <a href="docs.html">Docs</a>
+  </div>
+  <div class="nav-right">
+    <div class="nav-status">
+      <span class="pulse-dot" id="status-dot"></span>
+      <span id="status-text">CONNECTING</span>
+    </div>
+    <button class="hamburger" id="hamburger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</nav>
+
+<div class="page">
+
+  <!-- ===== HERO ===== -->
+  <section class="hero" id="home">
+    <div class="hero-left">
+      <div class="hero-eyebrow">World Cup 2026 · Sharp Money Detector</div>
+      <h1 class="hero-title">Odds<span>Edge</span></h1>
+      <p class="hero-desc">
+        Autonomous tri-source divergence engine monitoring TxLINE consensus, Pinnacle sharp lines, and Polymarket prediction markets in real time.
+      </p>
+      <div class="hero-live">
+        <span class="pulse-dot"></span>
+        LIVE MainNet
+      </div>
+      <div class="hero-stats">
+        <div>
+          <div class="hero-stat-val" id="hs-signals">0</div>
+          <div class="hero-stat-label">Signals</div>
+        </div>
+        <div>
+          <div class="hero-stat-val" id="hs-accuracy">--</div>
+          <div class="hero-stat-label">Accuracy</div>
+        </div>
+        <div>
+          <div class="hero-stat-val" id="hs-pnl">$0</div>
+          <div class="hero-stat-label">Paper P&amp;L</div>
+        </div>
+      </div>
+    </div>
+    <div class="hero-right">
+      <div class="video-frame">
+        <video
+          src="https://res.cloudinary.com/duf6r8fhk/video/upload/v1783619832/fifa_world_cup_misshz.mp4"
+          autoplay
+          loop
+          muted
+          playsinline
+          preload="none"
+        ></video>
+      </div>
+    </div>
+  </section>
+
+  <div class="content">
+
+    <!-- ===== FIXTURES SECTION ===== -->
+    <section id="fixtures">
+      <div class="section-label"><span class="pulse-dot"></span> Tracked Fixtures</div>
+      <div class="fixtures-grid" id="fixtures-grid">
+        <div class="empty-state">Loading fixtures...</div>
+      </div>
+    </section>
+
+    <!-- ===== SIGNALS SECTION ===== -->
+    <section id="signals">
+      <div class="section-label">&#9632; Agent Signals &amp; Calls</div>
+      <div class="signals-list" id="signals-list">
+        <div class="empty-state">Loading signals...</div>
+      </div>
+    </section>
+
+    <!-- ===== LOGS SECTION ===== -->
+    <section id="logs">
+      <div class="section-label">&#9632; Live Agent Log</div>
+      <div class="log-console" id="log-console">
+        <div class="log-line"><span class="log-ts">--:--:--</span><span class="log-level-info">INFO</span><span class="log-msg">OddsEdge agent initializing...</span></div>
+      </div>
+    </section>
+
+    <!-- ===== P&L SECTION ===== -->
+    <section id="pnl">
+      <div class="section-label">&#9632; Performance &amp; P&amp;L</div>
+      <div class="pnl-layout">
+        <div class="glass pnl-chart-wrap">
+          <div style="font-size:0.72rem;font-family:var(--font-mono);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:1rem;">Equity Curve</div>
+          <div class="pnl-chart-canvas-wrap">
+            <canvas id="pnl-chart"></canvas>
+          </div>
+        </div>
+        <div class="pnl-stats-col">
+          <div class="glass pnl-stat-card">
+            <div class="pnl-stat-label">Paper P&amp;L</div>
+            <div class="pnl-stat-val" id="pnl-total">$0.00</div>
+            <div class="pnl-stat-sub">Settled trades only</div>
+          </div>
+          <div class="glass pnl-stat-card">
+            <div class="pnl-stat-label">Overall Accuracy</div>
+            <div class="pnl-stat-val" id="pnl-accuracy">--</div>
+            <div class="pnl-stat-sub" id="pnl-scored-sub">0 scored signals</div>
+          </div>
+          <div class="glass pnl-stat-card" style="padding:1.25rem;gap:0.6rem;">
+            <div class="pnl-stat-label" style="margin-bottom:0.3rem;">Accuracy Breakdown</div>
+            <div class="pnl-acc-grid">
+              <div class="pnl-acc-item"><div class="pnl-acc-item-label">High Conf</div><div class="pnl-acc-item-val" id="acc-hc">--</div></div>
+              <div class="pnl-acc-item"><div class="pnl-acc-item-label">Steam</div><div class="pnl-acc-item-val" id="acc-steam">--</div></div>
+              <div class="pnl-acc-item"><div class="pnl-acc-item-label">Tri-Source</div><div class="pnl-acc-item-val" id="acc-tri">--</div></div>
+              <div class="pnl-acc-item"><div class="pnl-acc-item-label">Total Signals</div><div class="pnl-acc-item-val" id="acc-total">0</div></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </div><!-- /.content -->
+
+  <!-- ===== FOOTER ===== -->
+  <footer>
+    <div class="footer-left"><span>OddsEdge</span> · Sharp Money Detector · World Cup 2026</div>
+    <div class="footer-right" id="footer-ts">LAST UPDATE: --:--:--</div>
+  </footer>
+
+</div>
+
+<!-- ===== FIXTURE MODAL ===== -->
+<div class="modal-overlay" id="fixture-modal" role="dialog" aria-modal="true">
+  <div class="glass modal" id="fixture-modal-body">
+    <button class="modal-close" id="fixture-modal-close">&#x2715;</button>
+    <h2 id="fm-title">--</h2>
+    <div class="modal-subtitle" id="fm-subtitle">--</div>
+    <div class="modal-grid" id="fm-stats"></div>
+    <div class="section-label" style="margin-bottom:0.75rem;">&#9632; Signals for this fixture</div>
+    <div class="modal-signal-list" id="fm-signals"></div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   OddsEdge Dashboard — v2
+   No em-dashes, no lag, no library except Chart.js CDN
+   ============================================================ */
+
+const API = 'http://localhost:5000/api';
+
+/* ---- State ---- */
+let pnlChart = null;
+const pnlSeenTimestamps = new Set();
+const expandedSignals = new Set();   // signal ids whose rows are open
+const commentaryCache = {};          // sig.id -> text
+
+/* ---- Utility ---- */
+const fmt = {
+  time: iso => {
+    if (!iso) return '--';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch { return '--'; }
+  },
+  date: iso => {
+    if (!iso) return '--';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' });
+    } catch { return '--'; }
+  },
+  pct: v => v !== null && v !== undefined ? v.toFixed(1) + '%' : '--',
+  pnl: v => {
+    if (v === null || v === undefined) return '$0.00';
+    const sign = v >= 0 ? '+' : '';
+    return sign + '$' + Math.abs(v).toFixed(2);
+  },
+  dir: d => {
+    if (!d) return '--';
+    const m = { part1:'Home (1)', part2:'Away (2)', draw:'Draw (X)', home:'Home (1)', away:'Away (2)' };
+    return m[d] || d;
+  },
+  market: m => {
+    const map = {
+      '1X2_PARTICIPANT_RESULT': '1X2',
+      'ASIANHANDICAP_PARTICIPANT_GOALS': 'Asian HCP',
+      'OVERUNDER_PARTICIPANT_GOALS': 'O/U'
+    };
+    return map[m] || m;
+  }
+};
+
+function el(id) { return document.getElementById(id); }
+function safe(v, fallback = '--') { return v !== null && v !== undefined ? v : fallback; }
+
+/* ---- Connection state ---- */
+let _connected = null;
+function setConnected(ok) {
+  if (_connected === ok) return;
+  _connected = ok;
+  const dot = el('status-dot');
+  const txt = el('status-text');
+  if (ok) {
+    dot.classList.remove('off');
+    txt.textContent = 'LIVE';
+    txt.classList.add('live');
+  } else {
+    dot.classList.add('off');
+    txt.textContent = 'OFFLINE';
+    txt.classList.remove('live');
+  }
+}
+
+/* ---- Log console ---- */
+const logConsole = el('log-console');
+function addLog(level, msg) {
+  const ts = fmt.time(new Date().toISOString());
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = `<span class="log-ts">${ts}</span><span class="log-level-${level}">${level.toUpperCase()}</span><span class="log-msg">${msg}</span>`;
+  logConsole.appendChild(line);
+  // keep last 120 lines
+  while (logConsole.children.length > 120) logConsole.removeChild(logConsole.firstChild);
+  logConsole.scrollTop = logConsole.scrollHeight;
+}
+
+/* ---- Chart.js P&L init ---- */
+function initChart() {
+  const ctx = el('pnl-chart').getContext('2d');
+  pnlChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'Cumulative P&L',
+        data: [],
+        borderColor: '#C0FF38',
+        borderWidth: 2,
+        backgroundColor: 'rgba(192,255,56,0.05)',
+        fill: true,
+        tension: 0.15,
+        pointRadius: 3,
+        pointBackgroundColor: '#C0FF38',
+        pointBorderColor: '#000204',
+        pointHoverRadius: 5,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: 'rgba(26,36,32,0.5)' }, ticks: { color: '#8a9490', font: { size: 9, family: 'var(--font-mono)' } } },
+        y: { grid: { color: 'rgba(26,36,32,0.5)' }, ticks: { color: '#8a9490', font: { size: 9, family: 'var(--font-mono)' }, callback: v => '$' + v } }
+      }
+    }
+  });
+}
+
+function generateSparklineSvg(sigId, magnitude) {
+  const seed = sigId || 1;
+  const points = [];
+  const width = 300;
+  const height = 40;
+  const numPoints = 12;
+  const step = width / (numPoints - 1);
+  
+  for (let i = 0; i < numPoints; i++) {
+    const angle = (seed * 23 + i * 47) % 360;
+    const val = 15 + Math.sin(angle * Math.PI / 180) * 12 + (i * 1.2);
+    points.push(`${(i * step).toFixed(1)},${(height - val).toFixed(1)}`);
+  }
+  
+  return `
+    <svg width="100%" height="45" viewBox="0 0 300 45" style="margin: 0.5rem 0; overflow: visible;">
+      <path d="M 0,40 L ${points.join(' L ')} L 300,40" fill="url(#sparkline-grad-${seed})" stroke="none" />
+      <path d="M ${points.join(' L ')}" fill="none" stroke="var(--neon)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      <circle cx="300" cy="${points[points.length-1].split(',')[1]}" r="3" fill="var(--neon)" />
+      <defs>
+        <linearGradient id="sparkline-grad-${seed}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--neon)" stop-opacity="0.2" />
+          <stop offset="100%" stop-color="var(--neon)" stop-opacity="0.0" />
+        </linearGradient>
+      </defs>
+    </svg>
+  `;
+}
+
+function triggerFixtureModal(fixtureId) {
+  const fx = _allFixtures.find(f => String(f.fixture_id) === String(fixtureId));
+  if (fx) {
+    openFixtureModal(fx);
+  }
+}
+
+/* ---- Fetch wrapper ---- */
+async function apiFetch(path) {
+  const res = await fetch(API + path);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+/* ============================================================
+   FIXTURES
+   ============================================================ */
+let _allFixtures = [];
+let _fixtures = [];
+
+function buildFixtureCard(fx) {
+  const statusClass = fx.status === 'LIVE' ? 'status-live' : fx.status === 'FINISHED' ? 'status-finished' : 'status-upcoming';
+  let statusBadge;
+  if (fx.status === 'LIVE') statusBadge = `<span class="badge badge-neon"><span class="pulse-dot" style="width:6px;height:6px;"></span>LIVE</span>`;
+  else if (fx.status === 'FINISHED') statusBadge = `<span class="badge badge-muted">Finished</span>`;
+  else statusBadge = `<span class="badge badge-muted">Upcoming</span>`;
+
+  const resultHtml = fx.final_result
+    ? `<div class="fixture-result">Result: <span>${fx.final_result === 'part1' ? fx.participant1 + ' Win' : fx.final_result === 'part2' ? fx.participant2 + ' Win' : 'Draw'}</span></div>`
+    : '';
+
+  const div = document.createElement('div');
+  div.className = `glass fixture-card ${statusClass}`;
+  div.dataset.fxId = fx.fixture_id;
+  div.innerHTML = `
+    <div class="fixture-card-top">
+      <div>
+        <div class="fixture-teams">${safe(fx.participant1)} vs ${safe(fx.participant2)}</div>
+        <div class="fixture-vs" style="font-size:0.7rem;color:var(--text-muted);font-family:var(--font-mono);">${safe(fx.competition, 'World Cup 2026')}</div>
+      </div>
+      <div class="fixture-meta">
+        ${statusBadge}
+        <span class="fixture-time">${fmt.date(fx.start_time)}</span>
+      </div>
+    </div>
+    ${resultHtml}
+    <div class="fixture-signals-count">&#9632; Signals: <b id="fx-sig-count-${fx.fixture_id}">...</b></div>
+  `;
+  div.addEventListener('click', () => openFixtureModal(fx));
+  return div;
+}
+
+async function updateFixtures() {
+  try {
+    const data = await apiFetch('/fixtures');
+    setConnected(true);
+    _allFixtures = data.fixtures || [];
+    // Only display upcoming or live tracked fixtures in the active Tracked Fixtures area
+    _fixtures = _allFixtures.filter(fx => fx.status !== 'FINISHED');
+    
+    const grid = el('fixtures-grid');
+    if (_fixtures.length === 0) {
+      grid.innerHTML = '<div class="empty-state">No active tracked fixtures.</div>';
+      return;
+    }
+    
+    // Always rebuild to prevent stale closures and update status/results correctly
+    grid.innerHTML = '';
+    _fixtures.forEach(fx => grid.appendChild(buildFixtureCard(fx)));
+    
+    // fetch per-fixture signal counts
+    _fixtures.forEach(async fx => {
+      try {
+        const fdata = await apiFetch('/signals/' + fx.fixture_id);
+        const cnt = el('fx-sig-count-' + fx.fixture_id);
+        if (cnt) cnt.textContent = (fdata.signals || []).length;
+      } catch { /* ignore */ }
+    });
+    addLog('info', `Fixtures updated: ${_fixtures.length} active`);
+  } catch (e) {
+    setConnected(false);
+    addLog('error', 'Fixtures fetch failed: ' + e.message);
+  }
+}
+
+/* ---- Fixture Modal ---- */
+async function openFixtureModal(fx) {
+  el('fm-title').textContent = (fx.participant1 || '--') + ' vs ' + (fx.participant2 || '--');
+  el('fm-subtitle').textContent = safe(fx.competition, 'World Cup 2026') + ' · Fixture ID: ' + fx.fixture_id;
+
+  const statsGrid = el('fm-stats');
+  const statusLabel = fx.status === 'LIVE' ? 'IN PLAY' : fx.status || '--';
+  let result = '--';
+  if (fx.final_result === 'part1') result = fx.participant1 + ' Win';
+  else if (fx.final_result === 'part2') result = fx.participant2 + ' Win';
+  else if (fx.final_result === 'draw') result = 'Draw';
+
+  statsGrid.innerHTML = `
+    <div class="modal-stat"><div class="modal-stat-label">Status</div><div class="modal-stat-val">${statusLabel}</div></div>
+    <div class="modal-stat"><div class="modal-stat-label">Kickoff</div><div class="modal-stat-val" style="font-size:0.85rem;">${fmt.date(fx.start_time)}</div></div>
+    <div class="modal-stat"><div class="modal-stat-label">Final Result</div><div class="modal-stat-val" style="font-size:0.85rem;">${result}</div></div>
+    <div class="modal-stat"><div class="modal-stat-label">Fixture ID</div><div class="modal-stat-val" style="font-size:0.78rem;color:var(--text-muted);">${fx.fixture_id}</div></div>
+  `;
+
+  const sigList = el('fm-signals');
+  sigList.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;">Loading signals...</div>';
+
+  el('fixture-modal').classList.add('open');
+
+  try {
+    const fdata = await apiFetch('/signals/' + fx.fixture_id);
+    const sigs = fdata.signals || [];
+    if (sigs.length === 0) {
+      sigList.innerHTML = '<div class="empty-state">No signals for this fixture.</div>';
+      return;
+    }
+    sigList.innerHTML = '';
+    
+    // Sort to show newest first
+    sigs.sort((a, b) => b.id - a.id);
+    
+    sigs.forEach(sig => {
+      const item = document.createElement('div');
+      item.className = 'modal-signal-item';
+      
+      const isTri = sig.signal_type === 'TRI_SOURCE_DIVERGENCE';
+      const typeLabel = isTri ? 'TRI-SOURCE' : 'STEAM';
+      const typeBadgeClass = isTri ? 'badge-tri' : 'badge-steam';
+      const outcomeCls = sig.outcome === 'CORRECT' ? 'outcome-correct' : sig.outcome === 'INCORRECT' ? 'outcome-incorrect' : 'outcome-pending';
+      const outcomeLabel = sig.outcome || 'PENDING';
+      const conf = Math.round((sig.confidence_score || 0) * 100);
+      
+      const leaningDirection = sig.direction === 'part1' ? fx.participant1 : sig.direction === 'part2' ? fx.participant2 : sig.direction === 'away' ? fx.participant2 : sig.direction === 'home' ? fx.participant1 : sig.direction;
+      const isUp = (sig.pct_change || 0) >= 0;
+      
+      let detailHtml = '';
+      if (isTri) {
+        detailHtml = `
+          <div class="factor-stats-table">
+            <div class="factor-stat-item">
+              <span class="factor-stat-label">Market</span>
+              <span class="factor-stat-val">${fmt.market(sig.market)}</span>
+            </div>
+            <div class="factor-stat-item">
+              <span class="factor-stat-label">TxLINE Implied</span>
+              <span class="factor-stat-val">${sig.txline_prob ? (sig.txline_prob * 100).toFixed(1) + '%' : 'n/a'}</span>
+            </div>
+            <div class="factor-stat-item">
+              <span class="factor-stat-label">Pinnacle Implied</span>
+              <span class="factor-stat-val">${sig.pinnacle_prob ? (sig.pinnacle_prob * 100).toFixed(1) + '%' : 'n/a'}</span>
+            </div>
+            <div class="factor-stat-item">
+              <span class="factor-stat-label">Polymarket Implied</span>
+              <span class="factor-stat-val">${sig.polymarket_prob ? (sig.polymarket_prob * 100).toFixed(1) + '%' : 'n/a'}</span>
+            </div>
+            <div class="factor-stat-item">
+              <span class="factor-stat-label">Divergence</span>
+              <span class="factor-stat-val" style="color:var(--neon);">${sig.divergence_pct ? (sig.divergence_pct * 100).toFixed(2) + '%' : 'n/a'}</span>
+            </div>
+            <div class="factor-stat-item">
+              <span class="factor-stat-label">Outlier Source</span>
+              <span class="factor-stat-val">${sig.outlier_source ? sig.outlier_source.toUpperCase() : 'n/a'}</span>
+            </div>
+            <div class="factor-stat-item">
+              <span class="factor-stat-label">Detected At</span>
+              <span class="factor-stat-val">${fmt.time(sig.detected_at)}</span>
+            </div>
+          </div>
+        `;
+      } else {
+        detailHtml = `
+          <div class="factor-stats-table">
+            <div class="factor-stat-item">
+              <span class="factor-stat-label">Market</span>
+              <span class="factor-stat-val">${fmt.market(sig.market)}</span>
+            </div>
+            <div class="factor-stat-item">
+              <span class="factor-stat-label">Price Movement</span>
+              <span class="factor-stat-val" style="color:${isUp?'var(--neon)':'var(--red)'};">${isUp?'▲':'▼'} ${Math.abs(sig.pct_change || 0).toFixed(2)}%</span>
+            </div>
+            <div class="factor-stat-item">
+              <span class="factor-stat-label">Persistence</span>
+              <span class="factor-stat-val">${sig.persistence_ticks || 0} ticks</span>
+            </div>
+            <div class="factor-stat-item">
+              <span class="factor-stat-label">Detected At</span>
+              <span class="factor-stat-val">${fmt.time(sig.detected_at)}</span>
+            </div>
+          </div>
+        `;
+      }
+      
+      const commentaryHtml = sig.ai_commentary ? `
+        <div style="margin-top:0.75rem;border-top:1px solid rgba(255,255,255,0.05);padding-top:0.5rem;">
+          <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:0.25rem;font-weight:700;">AI Commentary</div>
+          <div style="font-size:0.72rem;color:var(--text);line-height:1.4;">${sig.ai_commentary}</div>
+        </div>
+      ` : '';
+
+      item.innerHTML = `
+        <div class="modal-signal-header">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <span class="badge ${typeBadgeClass}">${typeLabel}</span>
+            <span style="font-size:0.8rem;font-weight:600;color:var(--neon);">leaning ${leaningDirection}</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span class="outcome-chip ${outcomeCls}">${outcomeLabel}</span>
+            <span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted);">conviction ${conf}/100</span>
+          </div>
+        </div>
+        <div class="conf-bar-wrap" style="margin-bottom:0.5rem;"><div class="conf-bar-fill" style="width:${conf}%"></div></div>
+        
+        <div class="modal-signal-expand open" id="ms-expand-${sig.id}">
+          <div class="modal-signal-detail" style="display:block; padding-top: 0.2rem;">
+            ${detailHtml}
+            ${commentaryHtml}
+          </div>
+        </div>
+      `;
+      sigList.appendChild(item);
+    });
+  } catch (e) {
+    sigList.innerHTML = '<div class="empty-state">Failed to load signals.</div>';
+  }
+}
+
+el('fixture-modal-close').addEventListener('click', () => el('fixture-modal').classList.remove('open'));
+el('fixture-modal').addEventListener('click', e => { if (e.target === el('fixture-modal')) el('fixture-modal').classList.remove('open'); });
+
+/* ============================================================
+   SIGNALS LIST
+   ============================================================ */
+let _allSignals = [];
+
+function buildGroupedSignalRow(sig) {
+  const isOpen = expandedSignals.has(sig.id);
+  const isTri = sig.signal_type === 'TRI_SOURCE_DIVERGENCE';
+  const typeLabel = isTri ? 'TRI-SOURCE' : 'STEAM';
+  const typeBadgeClass = isTri ? 'badge-tri' : 'badge-steam';
+  const conf = Math.round((sig.confidence_score || 0) * 100);
+  const outcomeCls = sig.outcome === 'CORRECT' ? 'outcome-correct' : sig.outcome === 'INCORRECT' ? 'outcome-incorrect' : 'outcome-pending';
+  const outcomeLabel = sig.outcome || 'PENDING';
+
+  let contentHtml = '';
+  if (isTri) {
+    const outlier = (sig.outlier_source || '').toLowerCase();
+    contentHtml = `
+      <div class="tri-probs">
+        <div class="tri-prob-box ${outlier==='txline'?'outlier':''}">
+          <div class="tri-prob-src">TxLINE</div>
+          <div class="tri-prob-val ${outlier==='txline'?'neon-val':''}">${fmt.pct(sig.txline_prob)}</div>
+        </div>
+        <div class="tri-prob-box ${outlier==='pinnacle'?'outlier':''}">
+          <div class="tri-prob-src">Pinnacle</div>
+          <div class="tri-prob-val ${outlier==='pinnacle'?'neon-val':''}">${fmt.pct(sig.pinnacle_prob)}</div>
+        </div>
+        <div class="tri-prob-box ${outlier==='polymarket'?'outlier':''}">
+          <div class="tri-prob-src">Polymarket</div>
+          <div class="tri-prob-val ${outlier==='polymarket'?'neon-val':''}">${fmt.pct(sig.polymarket_prob)}</div>
+        </div>
+      </div>`;
+  } else {
+    const up = (sig.pct_change || 0) >= 0;
+    contentHtml = `
+      <div class="steam-info">
+        <div class="steam-metric">
+          <div class="steam-metric-label">Movement</div>
+          <div class="steam-metric-val ${up?'neon-val':'red-val'}">${up?'▲':'▼'} ${Math.abs(sig.pct_change||0).toFixed(2)}%</div>
+        </div>
+        <div class="steam-metric">
+          <div class="steam-metric-label">Persistence</div>
+          <div class="steam-metric-val">${safe(sig.persistence_ticks, 0)} ticks</div>
+        </div>
+      </div>`;
+  }
+
+  const detailGrid = `
+    <div class="signal-detail-grid">
+      <div class="sdi"><div class="sdi-label">Market</div><div class="sdi-val">${fmt.market(sig.market)}</div></div>
+      <div class="sdi"><div class="sdi-label">Direction</div><div class="sdi-val" style="color:var(--neon);">${fmt.dir(sig.direction)}</div></div>
+      <div class="sdi"><div class="sdi-label">Detected At</div><div class="sdi-val">${fmt.time(sig.detected_at)}</div></div>
+      <div class="sdi"><div class="sdi-label">Fixture ID</div><div class="sdi-val" style="color:var(--text-muted);font-size:0.72rem;">${safe(sig.fixture_id)}</div></div>
+      ${sig.ai_commentary ? `<div class="sdi" style="grid-column:1/-1;"><div class="sdi-label">AI Commentary</div><div class="sdi-val" style="color:var(--text-muted);font-size:0.8rem;line-height:1.5;">${sig.ai_commentary}</div></div>` : ''}
+    </div>`;
+
+  const commentaryHtml = commentaryCache[sig.id]
+    ? `<div class="commentary-box">${commentaryCache[sig.id]}</div>`
+    : `<button class="btn-explain" id="explain-btn-${sig.id}" onclick="requestCommentary(${sig.id}, this)">Explain</button>`;
+
+  const verifyHtml = `<button class="btn-verify" id="verify-btn-${sig.id}" onclick="requestMerkle(${sig.id}, this)">Verify On-Chain</button><div id="merkle-wrap-${sig.id}"></div>`;
+
+  const div = document.createElement('div');
+  div.className = 'compact-signal-row';
+  div.dataset.sigId = sig.id;
+  div.innerHTML = `
+    <div class="compact-signal-header" onclick="toggleSignal(${sig.id})">
+      <div class="compact-signal-meta">
+        <span class="compact-market-name">${fmt.market(sig.market)}</span>
+        <span class="badge ${typeBadgeClass}">${typeLabel}</span>
+        <span class="compact-conf">${conf}%</span>
+        <span class="outcome-chip ${outcomeCls}">${outcomeLabel}</span>
+      </div>
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="flex-shrink:0;transition:transform 0.2s;color:var(--text-muted);" id="chevron-${sig.id}">
+        <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="compact-signal-actions" onclick="event.stopPropagation()">
+      <span id="commentary-wrap-${sig.id}">${commentaryHtml}</span>
+      <button class="btn-verify" id="verify-btn-${sig.id}" onclick="requestMerkle(${sig.id}, this)">Verify On-Chain</button>
+      <div id="merkle-wrap-${sig.id}" style="width: 100%;"></div>
+    </div>
+    <div class="signal-row-expand ${isOpen ? 'open' : ''}" id="sig-expand-${sig.id}">
+      ${contentHtml}
+      ${detailGrid}
+    </div>
+  `;
+  return div;
+}
+
+function buildFixtureGroupCard(group, idx) {
+  const fixtureId = group.fixture_id;
+  const participant1 = group.participant1;
+  const participant2 = group.participant2;
+
+  const fx = _allFixtures.find(f => String(f.fixture_id) === String(fixtureId));
+  const startTime = fx ? fx.start_time : null;
+  const kickoffText = startTime ? fmt.date(startTime) : (group.signals[0] ? fmt.time(group.signals[0].detected_at) : '');
+
+  const div = document.createElement('div');
+  div.className = 'fixture-group-card';
+  div.id = 'fg-card-' + fixtureId;
+
+  const displayStyle = 'none';
+  const chevronTransform = '';
+
+  div.innerHTML = `
+    <div class="fixture-group-header" onclick="toggleFixtureGroup('${fixtureId}')">
+      <div class="fixture-group-title">
+        <span class="fixture-group-names" style="cursor:pointer;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'" onclick="event.stopPropagation(); triggerFixtureModal('${fixtureId}')">${safe(participant1)} vs ${safe(participant2)}</span>
+        <span class="badge badge-steam">${group.signals.length} Signals</span>
+      </div>
+      <div class="fixture-group-meta">
+        <span class="fixture-group-time">${kickoffText}</span>
+        <svg class="chevron-fg" id="chevron-fg-${fixtureId}" width="12" height="12" viewBox="0 0 12 12" fill="none" style="transform:${chevronTransform};transition:transform 0.2s;color:var(--text-muted);">
+          <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+    </div>
+    <div class="fixture-group-body" id="fg-body-${fixtureId}" style="display:${displayStyle};">
+    </div>
+  `;
+
+  const body = div.querySelector('.fixture-group-body');
+  group.signals.forEach(sig => {
+    body.appendChild(buildGroupedSignalRow(sig));
+  });
+
+  return div;
+}
+
+function toggleSignal(id) {
+  if (expandedSignals.has(id)) { expandedSignals.delete(id); } else { expandedSignals.add(id); }
+  const exp = el('sig-expand-' + id);
+  const chev = el('chevron-' + id);
+  if (exp) exp.classList.toggle('open', expandedSignals.has(id));
+  if (chev) chev.style.transform = expandedSignals.has(id) ? 'rotate(180deg)' : '';
+}
+
+function toggleFixtureGroup(fixtureId) {
+  const body = el('fg-body-' + fixtureId);
+  const chev = el('chevron-fg-' + fixtureId);
+  if (body) {
+    const isHidden = body.style.display === 'none';
+    body.style.display = isHidden ? 'block' : 'none';
+    if (chev) {
+      chev.style.transform = isHidden ? 'rotate(180deg)' : '';
+    }
+  }
+}
+
+async function requestCommentary(sigId, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  try {
+    const res = await fetch(API + '/signals/' + sigId + '/commentary', { method: 'POST' });
+    const data = await res.json();
+    const text = data.commentary || 'Commentary unavailable.';
+    commentaryCache[sigId] = text;
+    const wrap = el('commentary-wrap-' + sigId);
+    if (wrap) wrap.innerHTML = `<div class="commentary-box">${text}</div>`;
+    addLog('info', 'Commentary generated for signal #' + sigId);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Explain';
+    addLog('warn', 'Commentary request failed for signal #' + sigId);
+  }
+}
+
+async function requestMerkle(sigId, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Verifying...';
+  try {
+    const res = await fetch(API + '/signals/' + sigId + '/merkle');
+    const data = await res.json();
+    const wrap = el('merkle-wrap-' + sigId);
+    
+    if (data.verified) {
+      const sig = _allSignals.find(s => s.id === sigId);
+      if (!sig) throw new Error("Signal not found in cache");
+      
+      const detectedAt = sig.detected_at;
+      const { Connection, PublicKey } = solanaWeb3;
+      const programId = new PublicKey("9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA"); // Mainnet
+      
+      const dt = new Date(detectedAt);
+      const epochDay = Math.floor(dt.getTime() / 86400000);
+      
+      // Derive PDA
+      const seed1 = new TextEncoder().encode("daily_batch_roots");
+      const seed2 = new Uint8Array(2);
+      const view = new DataView(seed2.buffer);
+      view.setUint16(0, epochDay, true); // true = little-endian
+      
+      const [pda] = PublicKey.findProgramAddressSync([seed1, seed2], programId);
+      const pdaStr = pda.toBase58();
+      
+      let onChainRoot = null;
+      let pdaExists = false;
+      let verificationTimeMs = null;
+      const startTime = performance.now();
+      
+      try {
+        const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+        const accountInfo = await connection.getAccountInfo(pda);
+        const endTime = performance.now();
+        verificationTimeMs = Math.round(endTime - startTime);
+        
+        if (accountInfo) {
+          pdaExists = true;
+          if (accountInfo.data.length >= 40) {
+            const rootBytes = accountInfo.data.slice(8, 40);
+            onChainRoot = Array.from(rootBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+          }
+        }
+      } catch (rpcErr) {
+        console.warn("Solana RPC fetch failed:", rpcErr);
+      }
+      
+      const explorerLink = `https://explorer.solana.com/address/${pdaStr}`;
+      const programLink = `https://explorer.solana.com/address/9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA`;
+      const proofNodesCount = data.merkle_proof?.proof?.length || 0;
+      
+      let rootHtml = '';
+      if (onChainRoot) {
+        rootHtml = `
+          <div class="merkle-detail-item">
+            <span class="md-label">On-Chain Root</span>
+            <span class="md-val text-neon font-mono">${onChainRoot.slice(0, 12)}...${onChainRoot.slice(-12)}</span>
+          </div>
+          <div class="merkle-detail-item">
+            <span class="md-label">Verification Time</span>
+            <span class="md-val font-mono">${verificationTimeMs}ms</span>
+          </div>
+        `;
+      } else if (pdaExists) {
+        rootHtml = `
+          <div class="merkle-detail-item">
+            <span class="md-label">On-Chain Root</span>
+            <span class="md-val font-mono" style="color:var(--text-muted);">Empty / Pending</span>
+          </div>
+          <div class="merkle-detail-item">
+            <span class="md-label">Verification Time</span>
+            <span class="md-val font-mono">${verificationTimeMs}ms</span>
+          </div>
+        `;
+      } else {
+        rootHtml = `
+          <div class="merkle-detail-item">
+            <span class="md-label">On-Chain Root</span>
+            <span class="md-val font-mono" style="color:var(--text-muted);">Not Initialized On-Chain</span>
+          </div>
+        `;
+      }
+      
+      wrap.innerHTML = `
+        <div class="merkle-box" style="margin-top: 0.5rem; display: block; clear: both; width: 100%;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+            <span class="merkle-label" style="margin-bottom:0; color:var(--neon);">✓ Verified On-Chain</span>
+            <a href="${explorerLink}" target="_blank" class="merkle-link-view">View on Explorer</a>
+          </div>
+          <div class="merkle-proof-details">
+            <div class="merkle-detail-item">
+              <span class="md-label">Daily PDA</span>
+              <span class="md-val font-mono">${pdaStr.slice(0, 8)}...${pdaStr.slice(-8)}</span>
+            </div>
+            <div class="merkle-detail-item">
+              <span class="md-label">Anchor Program</span>
+              <a href="${programLink}" target="_blank" class="md-val font-mono text-link">${programId.toBase58().slice(0, 8)}...${programId.toBase58().slice(-8)}</a>
+            </div>
+            <div class="merkle-detail-item">
+              <span class="md-label">Merkle Proof</span>
+              <span class="md-val font-mono">${proofNodesCount}-node path</span>
+            </div>
+            ${rootHtml}
+          </div>
+        </div>
+      `;
+      btn.textContent = 'Verified';
+      btn.style.borderColor = 'var(--neon)';
+      btn.style.color = 'var(--neon)';
+    } else {
+      wrap.innerHTML = '<div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.5rem;">Proof unavailable: ' + (data.error || 'unknown') + '</div>';
+      btn.disabled = false;
+      btn.textContent = 'Verify On-Chain';
+    }
+    addLog('info', 'Merkle proof fetched for signal #' + sigId);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Verify On-Chain';
+    addLog('error', 'Merkle verify failed: ' + e.message);
+  }
+}
+
+async function updateSignals() {
+  try {
+    const data = await apiFetch('/signals?limit=50');
+    setConnected(true);
+    let sigs = data.signals || [];
+    
+    // Proactive client-side deduplication of opposite-direction signals on the same tick
+    const deduped = [];
+    const seen = new Set();
+    // Sort to prioritize positive movements (UP) first, ensuring they are kept
+    sigs.sort((a, b) => (b.pct_change || 0) - (a.pct_change || 0));
+    sigs.forEach(s => {
+      const key = `${s.fixture_id}_${s.market}_${s.detected_at}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(s);
+      }
+    });
+    // Restore chronological order (highest ID first)
+    deduped.sort((a, b) => b.id - a.id);
+    sigs = deduped;
+    
+    _allSignals = sigs;
+
+    const list = el('signals-list');
+    if (sigs.length === 0) {
+      list.innerHTML = '<div class="empty-state">No signals recorded yet.</div>';
+      return;
+    }
+
+    // Group by fixture_id
+    const groups = [];
+    const groupMap = {};
+    sigs.forEach(sig => {
+      const fid = sig.fixture_id;
+      if (!groupMap[fid]) {
+        groupMap[fid] = {
+          fixture_id: fid,
+          participant1: sig.participant1 || 'Unknown',
+          participant2: sig.participant2 || 'Unknown',
+          signals: []
+        };
+        groups.push(groupMap[fid]);
+      }
+      groupMap[fid].signals.push(sig);
+    });
+
+    // Targeted update: only rebuild if IDs changed
+    const currentIds = Array.from(list.querySelectorAll('.compact-signal-row')).map(r => r.dataset.sigId);
+    const newIds = sigs.map(s => String(s.id));
+    const same = currentIds.length === newIds.length && currentIds.every((id, i) => id === newIds[i]);
+
+    if (!same) {
+      list.innerHTML = '';
+      groups.forEach((group, idx) => list.appendChild(buildFixtureGroupCard(group, idx)));
+    }
+    addLog('info', `Signals updated: ${sigs.length} total`);
+  } catch (e) {
+    setConnected(false);
+    addLog('error', 'Signals fetch failed: ' + e.message);
+  }
+}
+
+/* ============================================================
+   STATS
+   ============================================================ */
+async function updateStats() {
+  try {
+    const s = await apiFetch('/stats');
+    setConnected(true);
+
+    // Hero
+    el('hs-signals').textContent = s.total_signals || 0;
+    el('hs-accuracy').textContent = s.overall_accuracy_pct !== null ? s.overall_accuracy_pct + '%' : '--';
+    const pnlNum = s.total_pnl || 0;
+    el('hs-pnl').textContent = (pnlNum >= 0 ? '+' : '') + '$' + Math.abs(pnlNum).toFixed(0);
+
+    // P&L col
+    el('pnl-total').textContent = fmt.pnl(s.total_pnl);
+    el('pnl-total').style.color = (s.total_pnl || 0) >= 0 ? 'var(--neon)' : 'var(--red)';
+    el('pnl-accuracy').textContent = s.overall_accuracy_pct !== null ? s.overall_accuracy_pct + '%' : '--';
+    el('pnl-scored-sub').textContent = (s.scored_signals || 0) + ' scored signals';
+    el('acc-hc').textContent   = s.high_conf_accuracy_pct !== null ? s.high_conf_accuracy_pct + '%' : '--';
+    el('acc-steam').textContent = s.steam_accuracy_pct !== null ? s.steam_accuracy_pct + '%' : '--';
+    el('acc-tri').textContent   = s.trisource_accuracy_pct !== null ? s.trisource_accuracy_pct + '%' : '--';
+    el('acc-total').textContent = s.total_signals || 0;
+
+    addLog('info', `Stats: ${s.total_signals} signals, accuracy ${s.overall_accuracy_pct ?? '--'}%, P&L ${fmt.pnl(s.total_pnl)}`);
+  } catch (e) {
+    setConnected(false);
+    addLog('error', 'Stats fetch failed: ' + e.message);
+  }
+}
+
+/* ============================================================
+   P&L CHART
+   ============================================================ */
+async function updatePnL() {
+  try {
+    const data = await apiFetch('/pnl');
+    const series = data.pnl_series || [];
+    let updated = false;
+    series.forEach(pt => {
+      if (!pnlSeenTimestamps.has(pt.settled_at)) {
+        pnlSeenTimestamps.add(pt.settled_at);
+        pnlChart.data.labels.push(fmt.time(pt.settled_at));
+        pnlChart.data.datasets[0].data.push(pt.cumulative_pnl);
+        updated = true;
+      }
+    });
+    if (updated) pnlChart.update('none'); // 'none' = skip animation for speed
+  } catch (e) {
+    addLog('error', 'P&L fetch failed: ' + e.message);
+  }
+}
+
+
+
+/* ============================================================
+   FOOTER TIMESTAMP
+   ============================================================ */
+function tickFooter() {
+  el('footer-ts').textContent = 'LAST UPDATE: ' + fmt.time(new Date().toISOString());
+}
+
+/* ============================================================
+   NAV — hamburger
+   ============================================================ */
+el('hamburger').addEventListener('click', () => {
+  el('nav-links').classList.toggle('open');
+});
+document.querySelectorAll('.nav-links a').forEach(a => a.addEventListener('click', () => {
+  el('nav-links').classList.remove('open');
+}));
+
+/* ============================================================
+   INIT & POLLING
+   ============================================================ */
+async function firstLoad() {
+  addLog('info', 'OddsEdge initializing...');
+  initChart();
+  await Promise.allSettled([updateStats(), updateFixtures(), updatePnL(), updateSignals()]);
+  tickFooter();
+  addLog('info', 'Ready. Polling active.');
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  firstLoad();
+
+  // Live signals: 15s
+  setInterval(async () => { await updateSignals(); tickFooter(); }, 15000);
+  // Stats: 30s
+  setInterval(updateStats, 30000);
+  // Fixtures: 30s
+  setInterval(updateFixtures, 30000);
+  // P&L: 60s
+  setInterval(updatePnL, 60000);
+  // Log heartbeat: 45s
+  setInterval(() => addLog('info', 'Polling heartbeat OK'), 45000);
+});
+</script>
+</body>
+</html>

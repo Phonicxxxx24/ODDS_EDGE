@@ -1,0 +1,6 @@
+# Sharp Money Detector — Python dependencies
+flask>=3.0
+flask-cors>=4.0
+requests>=2.31          # HTTP calls to TxLINE REST + OddsPapi
+sseclient-py>=1.8       # Server-Sent Events consumption for TxLINE stream
+google-generativeai>=0.8  # Gemini AI commentary (SPEC.md 4.7)

@@ -1,0 +1,51 @@
+﻿# Credentials - NEVER push
+tokens.json
+txodds_api.txt
+*.pem
+*.key
+
+# Database & logs
+*.db
+*.sqlite
+*.log
+agent.log
+
+# Test & verification scripts
+test_*.py
+verify_*.py
+dump_*.py
+find_*.py
+probe_*.py
+insert_*.py
+
+# Media files
+*.mp4
+*.jpg
+*.jpeg
+*.png
+*.gif
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+
+# VS Code
+.vscode/
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Scratch files
+task.md
+walkthrough.md
