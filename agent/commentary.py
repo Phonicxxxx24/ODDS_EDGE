@@ -130,7 +130,7 @@ def generate_commentary(signal: dict) -> Optional[str]:
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-3.1-flash-lite")
         response = model.generate_content(prompt)
         text = response.text.strip() if response and response.text else None
         if text:

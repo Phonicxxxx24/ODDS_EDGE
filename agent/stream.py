@@ -147,6 +147,19 @@ class StreamConsumer:
         if not fixture_id or not prices or not price_names:
             return
 
+        # Get start_time from fixtures_tracked database table
+        start_time = None
+        if fixture_id:
+            try:
+                import sqlite3
+                db_path = os.path.join(_ROOT, "sharp_detector.db")
+                with sqlite3.connect(db_path) as conn:
+                    row = conn.execute("SELECT start_time FROM fixtures_tracked WHERE fixture_id = ?", (fixture_id,)).fetchone()
+                    if row:
+                        start_time = row[0]
+            except Exception:
+                pass
+
         # Feed into detector
         signals = self.detector.process_odds_tick(
             fixture_id=fixture_id,
@@ -155,6 +168,7 @@ class StreamConsumer:
             prices=prices,
             ts=ts,
             in_running=in_running,
+            start_time=start_time,
         )
 
         for sig in signals:

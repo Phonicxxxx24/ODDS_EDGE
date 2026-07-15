@@ -115,7 +115,7 @@ def fetch_scores_historical(fixture_id: int | str) -> list[dict]:
 
     [CONFIRMED 2026-07-09]: Returns SSE format (text/event-stream), NOT JSON array.
     Each line of the form `data: {...}` contains one score update JSON object.
-    Only available for fixtures that finished between 6h and 2 weeks ago.
+    Only available for fixtures that finished between 2h and 2 weeks ago.
     """
     import json as _json
     resp = requests.get(

@@ -369,17 +369,17 @@ def get_pnl_summary() -> list[dict]:
     """
     Return the cumulative P&L time series for the equity curve.
     Each row: { settled_at, profit_loss, cumulative_pnl }
-    Only settled (WON/LOST) trades are included, ordered by settled_at ASC.
+    Only settled (WON/LOST) trades are included, ordered by signals.detected_at ASC.
     Used by the Flask /api/pnl endpoint.
     """
     with _connect() as conn:
         rows = conn.execute(
             """
             SELECT
-                pt.settled_at,
+                s.detected_at AS settled_at,
                 pt.profit_loss,
                 SUM(pt.profit_loss) OVER (
-                    ORDER BY pt.settled_at ASC
+                    ORDER BY s.detected_at ASC
                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
                 ) AS cumulative_pnl,
                 s.fixture_id,
@@ -391,7 +391,7 @@ def get_pnl_summary() -> list[dict]:
             FROM paper_trades pt
             JOIN signals s ON s.id = pt.signal_id
             WHERE pt.status IN ('WON', 'LOST')
-            ORDER BY pt.settled_at ASC
+            ORDER BY s.detected_at ASC
             """
         ).fetchall()
         return [dict(r) for r in rows]

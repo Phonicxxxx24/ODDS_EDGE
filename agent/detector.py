@@ -200,11 +200,23 @@ class SteamDetector:
         ts: int,
         in_running: bool = False,
         match_minute: Optional[int] = None,
+        start_time: Optional[int] = None,
     ) -> list[SteamSignal]:
         """
         Process one OddsPayload from the SSE stream or snapshot.
         Returns any SteamSignal objects that fired on this tick.
         """
+        # Filter: only process pre-match if kickoff is within 2 hours
+        if not in_running and start_time is not None:
+            if start_time - ts > 2 * 60 * 60 * 1000:
+                return []
+
+        # Filter: skip OVERUNDER market entirely — steam on over/under lines
+        # reflects bookmaker line-adjustment, not sharp directional conviction.
+        # Data: 0/24 correct across all matches (0% accuracy, -$2400 PnL).
+        if market_type == "OVERUNDER_PARTICIPANT_GOALS":
+            return []
+
         signals: list[SteamSignal] = []
 
         for i, (name, raw) in enumerate(zip(price_names, prices)):
@@ -297,7 +309,13 @@ class SteamDetector:
                     decimal_odds=round(tick.decimal_odds, 4),
                 ))
 
+                # Filter: skip 'draw' direction — 0% accuracy in data (4/4 losses).
+                # Steam on draw probability is too noisy to be actionable.
+                if name == "draw":
+                    signals.pop()  # remove the signal we just added
+
         # opposite-direction deduplication for the same market on the same tick
+        # Keep the HIGHEST confidence signal when multiple fire simultaneously.
         filtered_signals: list[SteamSignal] = []
         by_market: dict[tuple[str, str], list[SteamSignal]] = {}
         for sig in signals:
@@ -308,12 +326,10 @@ class SteamDetector:
 
         for key, sig_list in by_market.items():
             if len(sig_list) > 1:
-                # Keep only signals with positive pct_change if any exist
-                has_up = any(s.pct_change > 0 for s in sig_list)
-                if has_up:
-                    filtered_signals.extend([s for s in sig_list if s.pct_change > 0])
-                else:
-                    filtered_signals.extend(sig_list)
+                # Multiple signals on same market same tick — keep the one with
+                # highest confidence score (most persistent / biggest move).
+                best = max(sig_list, key=lambda s: s.confidence_score)
+                filtered_signals.append(best)
             else:
                 filtered_signals.extend(sig_list)
 

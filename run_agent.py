@@ -39,8 +39,19 @@ class Tee:
 
 def run_scheduler_loop():
     print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] [Scheduler] Pre-kickoff scanner loop started (interval=5m)")
+    last_seed_time = 0
     while True:
         try:
+            now = time.time()
+            if now - last_seed_time > 4 * 3600:
+                print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] [Scheduler] Running automatic fixture seeding...")
+                try:
+                    from seed_fixtures import seed
+                    seed(days_ahead=6)
+                    last_seed_time = now
+                except Exception as e:
+                    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] [Scheduler] Auto-seeding failed: {e}")
+
             scan_pre_kickoff_fixtures()
         except Exception as e:
             print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] [Scheduler] Unexpected error: {e}")

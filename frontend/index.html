@@ -961,6 +961,7 @@ const API = 'http://localhost:5000/api';
 let pnlChart = null;
 const pnlSeenTimestamps = new Set();
 const expandedSignals = new Set();   // signal ids whose rows are open
+const expandedFixtureGroups = new Set(); // fixture ids whose group panels are open
 const commentaryCache = {};          // sig.id -> text
 
 /* ---- Utility ---- */
@@ -1381,9 +1382,9 @@ function buildGroupedSignalRow(sig) {
       ${sig.ai_commentary ? `<div class="sdi" style="grid-column:1/-1;"><div class="sdi-label">AI Commentary</div><div class="sdi-val" style="color:var(--text-muted);font-size:0.8rem;line-height:1.5;">${sig.ai_commentary}</div></div>` : ''}
     </div>`;
 
-  const commentaryHtml = commentaryCache[sig.id]
-    ? `<div class="commentary-box">${commentaryCache[sig.id]}</div>`
-    : `<button class="btn-explain" id="explain-btn-${sig.id}" onclick="requestCommentary(${sig.id}, this)">Explain</button>`;
+  const commentaryHtml = (commentaryCache[sig.id] || sig.ai_commentary)
+    ? `<div class="commentary-box">${commentaryCache[sig.id] || sig.ai_commentary}</div>`
+    : `<button class="btn-explain" type="button" id="explain-btn-${sig.id}" onclick="requestCommentary(${sig.id}, this)">Explain</button>`;
 
   const verifyHtml = `<button class="btn-verify" id="verify-btn-${sig.id}" onclick="requestMerkle(${sig.id}, this)">Verify On-Chain</button><div id="merkle-wrap-${sig.id}"></div>`;
 
@@ -1428,8 +1429,9 @@ function buildFixtureGroupCard(group, idx) {
   div.className = 'fixture-group-card';
   div.id = 'fg-card-' + fixtureId;
 
-  const displayStyle = 'none';
-  const chevronTransform = '';
+  const isExpanded = expandedFixtureGroups.has(String(fixtureId));
+  const displayStyle = isExpanded ? 'block' : 'none';
+  const chevronTransform = isExpanded ? 'rotate(180deg)' : '';
 
   div.innerHTML = `
     <div class="fixture-group-header" onclick="toggleFixtureGroup('${fixtureId}')">
@@ -1470,6 +1472,11 @@ function toggleFixtureGroup(fixtureId) {
   if (body) {
     const isHidden = body.style.display === 'none';
     body.style.display = isHidden ? 'block' : 'none';
+    if (isHidden) {
+      expandedFixtureGroups.add(String(fixtureId));
+    } else {
+      expandedFixtureGroups.delete(String(fixtureId));
+    }
     if (chev) {
       chev.style.transform = isHidden ? 'rotate(180deg)' : '';
     }

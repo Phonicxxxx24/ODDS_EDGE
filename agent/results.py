@@ -39,10 +39,10 @@ from agent.txline import fetch_scores_historical
 
 # ---------------------------------------------------------------------------
 # Estimated match duration threshold
-# We start checking for results ESTIMATED_DURATION_MS after start_time.
-# 115 minutes = 90' match + 25' buffer (extra time + added time + data lag)
+# We start checking for results ESTIMATED_DURATION_MS after start_time (kickoff).
+# 4 hours = 2 hours match duration + 2 hours buffer after match finishes
 # ---------------------------------------------------------------------------
-ESTIMATED_DURATION_MS = 115 * 60 * 1000   # 6_900_000 ms
+ESTIMATED_DURATION_MS = 4 * 60 * 60 * 1000   # 14,400,000 ms
 
 
 # ---------------------------------------------------------------------------
@@ -52,27 +52,31 @@ ESTIMATED_DURATION_MS = 115 * 60 * 1000   # 6_900_000 ms
 
 def _extract_final_score(updates: list[dict]) -> Optional[tuple[int, int]]:
     """
-    Find the terminal GameState ('F', 'FET', 'FPE', 'finished') or 'game_finalised' entry
-    in the historical SSE stream and return (participant1_goals, participant2_goals).
+    Search all events for a 'game_finalised' Action and extract goals.
 
-    Score.Participant1.Total.Goals / Score.Participant2.Total.Goals
-    Returns None if no terminal state or finalised entry found.
+    IMPORTANT: iterates ALL events looking for game_finalised rather than
+    stopping on the first parse error — the except block previously did
+    'return None' which silently aborted the whole search if Score parsing
+    failed on one event.
     """
-    for update in reversed(updates):
-        gs = str(update.get("GameState") or "").upper()
-        action = update.get("Action")
-        if gs not in ["F", "FET", "FPE", "FINISHED"] and action != "game_finalised":
-            continue
-        score = update.get("Score")
-        if not score:
+    for event in updates:
+        if event.get('Action') != 'game_finalised':
             continue
         try:
-            p1_total = score.get("Participant1", {}).get("Total", {})
-            p2_total = score.get("Participant2", {}).get("Total", {})
-            p1_goals = p1_total.get("Goals", 0)
-            p2_goals = p2_total.get("Goals", 0)
-            return (int(p1_goals), int(p2_goals))
-        except (KeyError, TypeError, ValueError):
+            score = event['Score']
+            # API omits the 'Goals' key entirely when a team scored 0 goals —
+            # never raise KeyError for it, default to 0.
+            p1_total = score['Participant1']['Total']
+            p2_total = score['Participant2']['Total']
+            p1 = p1_total.get('Goals', 0)
+            p2 = p2_total.get('Goals', 0)
+            return (p1, p2)
+        except (KeyError, TypeError) as exc:
+            # Log the actual error and keep iterating — there may be another
+            # game_finalised event later in the sequence with a valid Score.
+            print(f"[Results] game_finalised event found but Score parse failed: {exc}  "
+                  f"event keys={list(event.keys())}  "
+                  f"Score={event.get('Score')}")
             continue
     return None
 
@@ -199,7 +203,7 @@ def fetch_final_result(fixture_id: str) -> Optional[str]:
     Fetch historical scores for one fixture and determine the final result.
 
     Returns 'part1' | 'draw' | 'part2' if confirmed, or None if:
-      - Historical endpoint not yet available (< 6h since kickoff)
+      - Historical endpoint not yet available (< 2h after match finishes)
       - Match not yet finished (no 'game_finalised' entry)
       - HTTP error
     """
@@ -215,17 +219,26 @@ def fetch_final_result(fixture_id: str) -> Optional[str]:
 
     score = _extract_final_score(updates)
     if score is None:
-        # No terminal GameState entry — match may still be in progress
-        # Log the distinct GameStates for debugging
-        states = {u.get("GameState") for u in updates if isinstance(u, dict)}
-        actions = {u.get("Action") for u in updates if isinstance(u, dict)}
-        print(f"[Results] {fixture_id}: No terminal GameState ('F'/'FET'/'FPE') found. "
-              f"GameStates={states}  Actions seen={len(actions)}")
+        # No game_finalised action found — match may still be in progress
+        # Log the distinct GameStates AND full action name set for clear debugging
+        states   = {u.get("GameState") for u in updates if isinstance(u, dict)}
+        actions  = {u.get("Action")    for u in updates if isinstance(u, dict)}
+        has_gf   = "game_finalised" in actions
+        gf_events = [u for u in updates
+                     if isinstance(u, dict) and u.get("Action") == "game_finalised"]
+        print(f"[Results] {fixture_id}: Result not extracted from {len(updates)} events. "
+              f"game_finalised present={has_gf}  GameStates={states}")
+        if has_gf:
+            # game_finalised exists but Score parse failed — show raw Score for debugging
+            for gfe in gf_events:
+                print(f"[Results]   game_finalised Score field: {gfe.get('Score')}")
+        else:
+            print(f"[Results]   Action names seen: {sorted(a for a in actions if a)}")
         return None
 
     p1, p2 = score
     result = _goals_to_result(p1, p2)
-    print(f"[Results] {fixture_id}: terminal GameState found  P1={p1}  P2={p2}  -> {result}")
+    print(f"[Results] {fixture_id}: game_finalised action found  P1={p1}  P2={p2}  -> {result}")
     return result
 
 
