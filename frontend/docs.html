@@ -148,6 +148,32 @@
     td:first-child { font-family: var(--font-mono); color: var(--neon); font-size: 0.78rem; }
     tr:last-child td { border-bottom: none; }
 
+    /* API REFERENCE TABLE */
+    .api-table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--glass-border); background: var(--glass); backdrop-filter: blur(12px); margin-bottom: 1.5rem; }
+    .api-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 0; }
+    .api-table thead tr { background: rgba(192,255,56,0.04); border-bottom: 1px solid var(--glass-border); }
+    .api-table th { padding: 0.75rem 1rem; text-align: left; font-family: var(--font-mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--neon); font-weight: 700; white-space: nowrap; }
+    .api-table td { padding: 0.75rem 1rem; border-bottom: 1px solid rgba(26,36,32,0.4); color: var(--text-muted); vertical-align: top; line-height: 1.55; }
+    .api-table tr:last-child td { border-bottom: none; }
+    .api-table tr:hover td { background: rgba(192,255,56,0.03); }
+    .api-method { display: inline-block; font-family: var(--font-mono); font-size: 0.65rem; font-weight: 700; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.06em; margin-right: 6px; }
+    .method-get  { background: rgba(56,189,248,0.12); color: var(--sky); border: 1px solid rgba(56,189,248,0.25); }
+    .method-post { background: rgba(192,255,56,0.10); color: var(--neon); border: 1px solid rgba(192,255,56,0.2); }
+    .api-endpoint { font-family: var(--font-mono); color: var(--text); font-size: 0.8rem; }
+    .api-source-badge { display: inline-block; font-family: var(--font-mono); font-size: 0.63rem; padding: 2px 8px; border-radius: 4px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; }
+    .api-source-txline { background: rgba(56,189,248,0.07); border-color: rgba(56,189,248,0.2); color: var(--sky); }
+    .method-sse  { background: rgba(167,139,250,0.12); color: #a78bfa; border: 1px solid rgba(167,139,250,0.25); }
+    .api-table-group-label {
+      display: flex; align-items: center; gap: 10px;
+      padding: 0.6rem 1rem; background: rgba(192,255,56,0.03);
+      border-bottom: 1px solid var(--glass-border);
+      font-family: var(--font-mono); font-size: 0.62rem; text-transform: uppercase;
+      letter-spacing: 0.14em; color: var(--text-muted);
+    }
+    .api-table-group-label span { color: var(--neon); }
+    .api-table-group-label.txline-group { background: rgba(56,189,248,0.03); border-bottom-color: rgba(56,189,248,0.12); }
+    .api-table-group-label.txline-group span { color: var(--sky); }
+
     /* FOOTER */
     footer { padding: 2rem; border-top: 1px solid var(--border); font-size: 0.78rem; color: var(--text-muted); text-align: center; }
     footer span { color: var(--neon); font-weight: 600; }
@@ -186,6 +212,10 @@
     <div class="sidebar-section-label">System</div>
     <nav class="sidebar-nav">
       <a class="sidebar-link" href="#tech-stack">Technology Stack</a>
+    </nav>
+    <div class="sidebar-section-label">Reference</div>
+    <nav class="sidebar-nav">
+      <a class="sidebar-link" href="#api-reference">API Endpoints</a>
     </nav>
   </aside>
 
@@ -317,6 +347,133 @@
           <li><strong>Gemini 1.5 Flash:</strong> Generates contextual, on-demand AI explanations for signal occurrences.</li>
           <li><strong>TxLINE Merkle Proofs:</strong> Validates event data integrity via the TxLINE validation system.</li>
         </ul>
+      </div>
+    </section>
+
+    <!-- API REFERENCE -->
+    <section class="doc-section" id="api-reference">
+      <div class="doc-section-header">
+        <div class="doc-section-icon">&#9881;</div>
+        <span class="doc-section-title">API Reference</span>
+        <span class="doc-section-tag">Endpoints</span>
+      </div>
+      <div class="content-block">
+        <p>
+          This section documents all HTTP endpoints used by OddsEdge — both the internal Flask REST API consumed by the frontend, and the external TxLINE API called by the Python agent for live market data and cryptographic validation.
+        </p>
+      </div>
+
+      <div class="api-table-wrap">
+        <div class="api-table-group-label"><span>&#9679;</span> Internal — Flask REST API &nbsp;·&nbsp; Base: <code>http://localhost:5000</code></div>
+        <table class="api-table">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Endpoint</th>
+              <th>Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="api-source-badge">Flask API</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/signals</span></td>
+              <td>Returns all detected signals, newest first. Supports <code>?limit=</code> and <code>?offset=</code> pagination. Default: limit=100, offset=0.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge">Flask API</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/signals/live</span></td>
+              <td>Returns signals that belong to fixtures currently marked as <strong>LIVE</strong> (in-play), ordered by detection time descending.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge">Flask API</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/signals/&lt;fixture_id&gt;</span></td>
+              <td>Returns all signals for a single fixture, identified by <code>fixture_id</code>, ordered newest first.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge">Flask API</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/pnl</span></td>
+              <td>Returns the cumulative P&amp;L time series for the equity curve chart. Each row contains <code>settled_at</code> and <code>cumulative_pnl</code> fields, ordered chronologically.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge">Flask API</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/stats</span></td>
+              <td>Returns aggregate accuracy statistics: total signal count, overall accuracy %, high-confidence accuracy (&ge; 0.7), STEAM accuracy, TRI_SOURCE accuracy, and total paper P&amp;L.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge">Flask API</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/fixtures</span></td>
+              <td>Returns all tracked fixtures and their current lifecycle status: <code>UPCOMING</code>, <code>LIVE</code>, or <code>FINISHED</code>, ordered by start time ascending.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge">Flask API</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/usage</span></td>
+              <td>Returns the OddsPapi API budget status: <code>calls_used</code>, <code>total_budget</code>, and <code>calls_remaining</code> to track rate-limit consumption.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge">Flask API</span></td>
+              <td><span class="api-method method-post">POST</span><span class="api-endpoint">/api/signals/&lt;signal_id&gt;/commentary</span></td>
+              <td>Generates (or returns cached) Gemini AI commentary for a specific signal. Returns <code>commentary</code>, <code>signal_id</code>, and a <code>cached</code> boolean flag. Returns 503 if <code>GEMINI_API_KEY</code> is not configured.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge">Flask API</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/signals/&lt;signal_id&gt;/merkle</span></td>
+              <td>Fetches the cryptographic Merkle proof from the TxLINE Validation API for a given signal. Resolves the <code>MessageId</code> and timestamp, then returns the verified proof confirming real-time data integrity.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="api-table-group-label txline-group"><span>&#9679;</span> External — TxLINE API &nbsp;·&nbsp; Base: <code>https://txline.txodds.com</code></div>
+        <table class="api-table">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Endpoint</th>
+              <th>Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="api-source-badge api-source-txline">TxLINE</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/fixtures/snapshot</span></td>
+              <td>Fetches the fixture list for a given epoch day via <code>?startEpochDay=N</code>. Returns an array of Fixture objects used to seed and track upcoming World Cup matches.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge api-source-txline">TxLINE</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/odds/snapshot/{fixtureId}</span></td>
+              <td>Fetches the latest odds snapshot for a single fixture. Returns an array of <code>OddsPayload</code> objects used to bootstrap the steam detector's initial state before the live stream connects.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge api-source-txline">TxLINE</span></td>
+              <td><span class="api-method method-sse">SSE</span><span class="api-endpoint">/api/odds/stream</span></td>
+              <td>Real-time Server-Sent Events stream of live odds updates. Accepts an optional <code>?fixtureId=</code> filter. The core feed driving steam detection — reconnects automatically with <code>Last-Event-ID</code> on disconnect.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge api-source-txline">TxLINE</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/odds/updates/{epochDay}/{hour}/{interval}</span></td>
+              <td>Fetches historical odds updates for a specific 5-minute interval bucket. Used during Merkle proof resolution to find the <code>MessageId</code> and <code>Ts</code> closest to a signal's detection timestamp. Accepts optional <code>?fixtureId=</code> filter.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge api-source-txline">TxLINE</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/odds/validation</span></td>
+              <td>Fetches the cryptographic Merkle proof for a specific odds update. Requires <code>?messageId=</code> and <code>?ts=</code> query params. Returns the proof object that confirms the odds data existed on-chain at the exact timestamp of detection.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge api-source-txline">TxLINE</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/scores/snapshot/{fixtureId}</span></td>
+              <td>Fetches the latest score per action for a live fixture. Returns an array of Scores objects used by the results thread to check match progress and finalization status.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge api-source-txline">TxLINE</span></td>
+              <td><span class="api-method method-get">GET</span><span class="api-endpoint">/api/scores/historical/{fixtureId}</span></td>
+              <td>Fetches the full post-match score history for a finished fixture (available 2h–2 weeks after match end). Returns SSE-formatted <code>data:</code> lines parsed into score update objects, used by the auto-settlement loop to determine final outcomes.</td>
+            </tr>
+            <tr>
+              <td><span class="api-source-badge api-source-txline">TxLINE</span></td>
+              <td><span class="api-method method-sse">SSE</span><span class="api-endpoint">/api/scores/stream</span></td>
+              <td>Real-time Server-Sent Events stream of live score updates. Used to monitor in-play match state — minute, goals, and game finalization flag — to trigger paper trade settlement at the final whistle.</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
