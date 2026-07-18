@@ -220,6 +220,7 @@ Create `tokens.json` at the project root:
   "jwt": "your_txline_jwt",
   "apiToken": "your_txline_api_token",
   "gemini_key": "your_gemini_api_key"
+  "oddspapi_key": "your_oddspapi_key",  
 }
 ```
 
